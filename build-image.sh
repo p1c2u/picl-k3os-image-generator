@@ -2,6 +2,12 @@
 
 set -e
 
+# Architectures
+# ARMv5 32-bit (arm32v5)
+# ARMv6 32-bit (arm32v6) (alias armel)
+# ARMv7 32-bit (arm32v7) (alias armhf)
+# ARMv8 64-bit (arm64v8) (alias arm64)
+# ARMv8 32-bit (arm32v8)
 
 # Set this to default to a KNOWN GOOD pi firmware (e.g. 1.20200811); this is used if RASPBERRY_PI_FIRMWARE env variable is not specified
 DEFAULT_GOOD_PI_VERSION="1.20200811"
@@ -79,22 +85,38 @@ if [ -z "$IMAGE_TYPE" -o "$IMAGE_TYPE" = "help" -o "$IMAGE_TYPE" = "--help" -o "
 	echo "Supported image types:" >&2
 	echo "  raspberrypi - Raspberry Pi model 3B+/4." >&2
 	echo "  orangepipc2 - Orange Pi PC 2" >&2
-	echo "  all         - Calls itself once for each supported image type" >&2
+	echo "  orangepi2   - Orange Pi 2" >&2
+	echo "  arm64       - Calls itself once for each arm64 image type" >&2
+	echo "  armhf       - Calls itself once for each armhf image type" >&2
 	exit 1
 elif [ "$IMAGE_TYPE" = "raspberrypi" ]; then
 	echo "Building an image for the Raspberry Pi model 3B+/4."
+	ARCH=arm64
+	ARCH_ALIAS=arm64
+	ARCH_BITS=64
 elif [ "$IMAGE_TYPE" = "orangepipc2" ]; then
 	echo "Building an image for the Orange Pi PC 2."
-elif [ "$IMAGE_TYPE" = "all" ]; then
+	ARCH=arm64
+	ARCH_ALIAS=arm64
+	ARCH_BITS=64
+elif [ "$IMAGE_TYPE" = "orangepi2" ]; then
+	echo "Building an image for the Orange Pi 2."
+	ARCH=arm
+	ARCH_ALIAS=armhf
+	ARCH_BITS=""
+elif [ "$IMAGE_TYPE" = "arm64" ]; then
 	$0 "raspberrypi"
 	$0 "orangepipc2"
+	exit 0
+elif [ "$IMAGE_TYPE" = "armhf" ]; then
+	$0 "orangepi2"
 	exit 0
 else
 	echo "Unsupported image type \"$IMAGE_TYPE\". See \"$0 help\" for more information." >&2
 	exit 1
 fi
 
-if [ "$IMAGE_TYPE" = "orangepipc2" ]; then
+if [[ $IMAGE_TYPE == orangepi* ]]; then
 	# mkimage is in u-boot-tools
 	assert_tool mkimage
 fi
@@ -112,53 +134,73 @@ mkdir -p deps
 
 if [ "$IMAGE_TYPE" = "raspberrypi" ]; then
 	get_pifirmware
-elif [ "$IMAGE_TYPE" = "orangepipc2" ]; then
+elif [[ $IMAGE_TYPE == orangepi* ]]; then
 	# TODO: apt.armbian.com removes old versions, so these URLs become
 	# outdated. Find an armbian mirror that keeps old versions so that
 	# the URLs remain functional.
-	dl_dep linux-dtb-dev-sunxi64.deb https://apt.armbian.com/pool/main/l/linux-5.9.14-sunxi64/linux-dtb-current-sunxi64_20.11.3_arm64.deb
-	dl_dep linux-image-dev-sunxi64.deb https://apt.armbian.com/pool/main/l/linux-5.9.14-sunxi64/linux-image-current-sunxi64_20.11.3_arm64.deb
+	dl_dep linux-dtb-dev-sunxi${ARCH_BITS}.deb https://apt.armbian.com/pool/main/l/linux-5.9.14-sunxi${ARCH_BITS}/linux-dtb-current-sunxi${ARCH_BITS}_20.11.3_${ARCH_ALIAS}.deb
+	dl_dep linux-image-dev-sunxi${ARCH_BITS}.deb https://apt.armbian.com/pool/main/l/linux-5.9.14-sunxi${ARCH_BITS}/linux-image-current-sunxi${ARCH_BITS}_20.11.3_${ARCH_ALIAS}.deb
 
-	if [ ! -f "deps/armbian_orangepipc2.img" ]; then
+	if [ ! -f "deps/armbian_${IMAGE_TYPE}.img" ]; then
 		pushd deps
-		wget -O Armbian_orangepipc2_buster_current.img.xz https://armbian.tnahosting.net/dl/orangepipc2/archive/Armbian_20.11.3_Orangepipc2_buster_current_5.9.14.img.xz
-		unxz Armbian_orangepipc2_buster_current.img.xz
-		dd of=armbian_orangepipc2.img bs=1024 count=4096 < Armbian_orangepipc2_buster_current.img
-		rm Armbian_orangepipc2_buster_current.img
+		wget -O Armbian_${IMAGE_TYPE}_buster_current.img.xz https://armbian.tnahosting.net/dl/${IMAGE_TYPE}/archive/Armbian_20.11.3_${IMAGE_TYPE^}_buster_current_5.9.14.img.xz
+		unxz Armbian_${IMAGE_TYPE}_buster_current.img.xz
+		dd of=armbian_${IMAGE_TYPE}.img bs=1024 count=4096 < Armbian_${IMAGE_TYPE}_buster_current.img
+		rm Armbian_${IMAGE_TYPE}_buster_current.img
 		popd
 	fi
 fi
 
 if [ -z "${K3OS_VERSION}" ]; then
     echo "K3OS_VERSION env variable was not set - defaulting to known version [${DEFAULT_GOOD_K3OS_VERSION}]"
-    dl_dep k3os-rootfs-arm64.tar.gz https://github.com/rancher/k3os/releases/download/${DEFAULT_GOOD_K3OS_VERSION}/k3os-rootfs-arm64.tar.gz
+    dl_dep k3os-rootfs-${ARCH}.tar.gz https://github.com/rancher/k3os/releases/download/${DEFAULT_GOOD_K3OS_VERSION}/k3os-rootfs-${ARCH}.tar.gz
 else
     echo "K3OS_VERSION env variable set to ${K3OS_VERSION}"
-    dl_dep k3os-rootfs-arm64.tar.gz https://github.com/rancher/k3os/releases/download/${K3OS_VERSION}/k3os-rootfs-arm64.tar.gz
+    dl_dep k3os-rootfs-${ARCH}.tar.gz https://github.com/rancher/k3os/releases/download/${K3OS_VERSION}/k3os-rootfs-${ARCH}.tar.gz
 fi
 
 # To find the URL for these packages:
-# - Go to https://launchpad.net/ubuntu/bionic/arm64/<package name>/
+# - Go to https://launchpad.net/ubuntu/bionic/<arch>/<package name>/
 # - Under 'Publishing history', click the version number in the top row
 # - Under 'Downloadable files', use the URL of the .deb file
 # - Change http to https
 
-dl_dep libc6-arm64.deb https://launchpadlibrarian.net/365857916/libc6_2.27-3ubuntu1_arm64.deb
-dl_dep busybox-arm64.deb https://launchpadlibrarian.net/414117084/busybox_1.27.2-2ubuntu3.2_arm64.deb
-dl_dep libcom-err2-arm64.deb https://launchpadlibrarian.net/444344115/libcom-err2_1.44.1-1ubuntu1.2_arm64.deb
-dl_dep libblkid1-arm64.deb https://launchpadlibrarian.net/438655401/libblkid1_2.31.1-0.4ubuntu3.4_arm64.deb
-dl_dep libuuid1-arm64.deb https://launchpadlibrarian.net/438655406/libuuid1_2.31.1-0.4ubuntu3.4_arm64.deb
-dl_dep libext2fs2-arm64.deb https://launchpadlibrarian.net/444344116/libext2fs2_1.44.1-1ubuntu1.2_arm64.deb
-dl_dep e2fsprogs-arm64.deb https://launchpadlibrarian.net/444344112/e2fsprogs_1.44.1-1ubuntu1.2_arm64.deb
-dl_dep parted-arm64.deb https://launchpadlibrarian.net/415806982/parted_3.2-20ubuntu0.2_arm64.deb
-dl_dep libparted2-arm64.deb https://launchpadlibrarian.net/415806981/libparted2_3.2-20ubuntu0.2_arm64.deb
-dl_dep libreadline7-arm64.deb https://launchpadlibrarian.net/354246199/libreadline7_7.0-3_arm64.deb
-dl_dep libtinfo5-arm64.deb https://launchpadlibrarian.net/371711519/libtinfo5_6.1-1ubuntu1.18.04_arm64.deb
-dl_dep libdevmapper1-arm64.deb https://launchpadlibrarian.net/431292125/libdevmapper1.02.1_1.02.145-4.1ubuntu3.18.04.1_arm64.deb
-dl_dep libselinux1-arm64.deb https://launchpadlibrarian.net/359065467/libselinux1_2.7-2build2_arm64.deb
-dl_dep libudev1-arm64.deb https://launchpadlibrarian.net/444834685/libudev1_237-3ubuntu10.31_arm64.deb
-dl_dep libpcre3-arm64.deb https://launchpadlibrarian.net/355683636/libpcre3_8.39-9_arm64.deb
-dl_dep util-linux-arm64.deb https://launchpadlibrarian.net/438655410/util-linux_2.31.1-0.4ubuntu3.4_arm64.deb
+if [ "$ARCH_ALIAS" = "arm64" ]; then
+	dl_dep libc6-${ARCH_ALIAS}.deb https://launchpadlibrarian.net/365857916/libc6_2.27-3ubuntu1_${ARCH_ALIAS}.deb
+	dl_dep busybox-${ARCH_ALIAS}.deb https://launchpadlibrarian.net/414117084/busybox_1.27.2-2ubuntu3.2_${ARCH_ALIAS}.deb
+	dl_dep libcom-err2-${ARCH_ALIAS}.deb https://launchpadlibrarian.net/444344115/libcom-err2_1.44.1-1ubuntu1.2_${ARCH_ALIAS}.deb
+	dl_dep libblkid1-${ARCH_ALIAS}.deb https://launchpadlibrarian.net/438655401/libblkid1_2.31.1-0.4ubuntu3.4_${ARCH_ALIAS}.deb
+	dl_dep libuuid1-${ARCH_ALIAS}.deb https://launchpadlibrarian.net/438655406/libuuid1_2.31.1-0.4ubuntu3.4_${ARCH_ALIAS}.deb
+	dl_dep libext2fs2-${ARCH_ALIAS}.deb https://launchpadlibrarian.net/444344116/libext2fs2_1.44.1-1ubuntu1.2_${ARCH_ALIAS}.deb
+	dl_dep e2fsprogs-${ARCH_ALIAS}.deb https://launchpadlibrarian.net/444344112/e2fsprogs_1.44.1-1ubuntu1.2_${ARCH_ALIAS}.deb
+	dl_dep parted-${ARCH_ALIAS}.deb https://launchpadlibrarian.net/415806982/parted_3.2-20ubuntu0.2_${ARCH_ALIAS}.deb
+	dl_dep libparted2-${ARCH_ALIAS}.deb https://launchpadlibrarian.net/415806981/libparted2_3.2-20ubuntu0.2_${ARCH_ALIAS}.deb
+	dl_dep libreadline7-${ARCH_ALIAS}.deb https://launchpadlibrarian.net/354246199/libreadline7_7.0-3_${ARCH_ALIAS}.deb
+	dl_dep libtinfo5-${ARCH_ALIAS}.deb https://launchpadlibrarian.net/371711519/libtinfo5_6.1-1ubuntu1.18.04_${ARCH_ALIAS}.deb
+	dl_dep libdevmapper1-${ARCH_ALIAS}.deb https://launchpadlibrarian.net/431292125/libdevmapper1.02.1_1.02.145-4.1ubuntu3.18.04.1_${ARCH_ALIAS}.deb
+	dl_dep libselinux1-${ARCH_ALIAS}.deb https://launchpadlibrarian.net/359065467/libselinux1_2.7-2build2_${ARCH_ALIAS}.deb
+	dl_dep libudev1-${ARCH_ALIAS}.deb https://launchpadlibrarian.net/444834685/libudev1_237-3ubuntu10.31_${ARCH_ALIAS}.deb
+	dl_dep libpcre3-${ARCH_ALIAS}.deb https://launchpadlibrarian.net/355683636/libpcre3_8.39-9_${ARCH_ALIAS}.deb
+	dl_dep util-linux-${ARCH_ALIAS}.deb https://launchpadlibrarian.net/438655410/util-linux_2.31.1-0.4ubuntu3.4_${ARCH_ALIAS}.deb
+elif [ "$ARCH_ALIAS" = "armhf" ]; then
+	dl_dep libc6-${ARCH_ALIAS}.deb https://launchpadlibrarian.net/365872392/libc6_2.27-3ubuntu1_${ARCH_ALIAS}.deb
+	dl_dep busybox-${ARCH_ALIAS}.deb https://launchpadlibrarian.net/414119087/busybox_1.27.2-2ubuntu3.2_${ARCH_ALIAS}.deb
+	dl_dep libcom-err2-${ARCH_ALIAS}.deb https://launchpadlibrarian.net/444344316/libcom-err2_1.44.1-1ubuntu1.2_${ARCH_ALIAS}.deb
+	dl_dep libblkid1-${ARCH_ALIAS}.deb https://launchpadlibrarian.net/438655354/libblkid1_2.31.1-0.4ubuntu3.4_${ARCH_ALIAS}.deb
+	dl_dep libuuid1-${ARCH_ALIAS}.deb https://launchpadlibrarian.net/438655358/libuuid1_2.31.1-0.4ubuntu3.4_${ARCH_ALIAS}.deb
+	dl_dep libext2fs2-${ARCH_ALIAS}.deb https://launchpadlibrarian.net/444344317/libext2fs2_1.44.1-1ubuntu1.2_${ARCH_ALIAS}.deb
+	dl_dep e2fsprogs-${ARCH_ALIAS}.deb https://launchpadlibrarian.net/444344314/e2fsprogs_1.44.1-1ubuntu1.2_${ARCH_ALIAS}.deb
+	dl_dep parted-${ARCH_ALIAS}.deb https://launchpadlibrarian.net/415807176/parted_3.2-20ubuntu0.2_${ARCH_ALIAS}.deb
+	dl_dep libparted2-${ARCH_ALIAS}.deb https://launchpadlibrarian.net/415807175/libparted2_3.2-20ubuntu0.2_${ARCH_ALIAS}.deb
+	dl_dep libreadline7-${ARCH_ALIAS}.deb https://launchpadlibrarian.net/354246227/libreadline7_7.0-3_${ARCH_ALIAS}.deb
+	dl_dep libtinfo5-${ARCH_ALIAS}.deb https://launchpadlibrarian.net/371711695/libtinfo5_6.1-1ubuntu1.18.04_${ARCH_ALIAS}.deb
+	dl_dep libdevmapper1-${ARCH_ALIAS}.deb https://launchpadlibrarian.net/431292017/libdevmapper1.02.1_1.02.145-4.1ubuntu3.18.04.1_${ARCH_ALIAS}.deb
+	dl_dep libselinux1-${ARCH_ALIAS}.deb https://launchpadlibrarian.net/359065179/libselinux1_2.7-2build2_${ARCH_ALIAS}.deb
+	dl_dep libudev1-${ARCH_ALIAS}.deb https://launchpadlibrarian.net/444835042/libudev1_237-3ubuntu10.31_${ARCH_ALIAS}.deb
+	dl_dep libpcre3-${ARCH_ALIAS}.deb https://launchpadlibrarian.net/355683662/libpcre3_8.39-9_${ARCH_ALIAS}.deb
+	dl_dep util-linux-${ARCH_ALIAS}.deb https://launchpadlibrarian.net/438655362/util-linux_2.31.1-0.4ubuntu3.4_${ARCH_ALIAS}.deb
+fi
+
 dl_dep rpi-firmware-nonfree-master.zip https://github.com/RPi-Distro/firmware-nonfree/archive/master.zip
 
 ## Make the image (capacity in MB, not MiB)
@@ -177,7 +219,7 @@ if [ "$IMAGE_TYPE" = "raspberrypi" ]; then
 	parted -s $IMAGE unit MB mkpart primary fat32 1 $BOOT_CAPACITY
 	parted -s $IMAGE unit MB mkpart primary $(($BOOT_CAPACITY+1)) $IMAGE_SIZE
 	parted -s $IMAGE set 1 boot on
-elif [ "$IMAGE_TYPE" = "orangepipc2" ]; then
+elif [[ $IMAGE_TYPE == orangepi* ]]; then
 	# Create a single partition; bootloader is copied from armbian
 	# at specific locations before the first partition. The partition
 	# will be resized to the SD card's maximum on first boot.
@@ -186,7 +228,7 @@ elif [ "$IMAGE_TYPE" = "orangepipc2" ]; then
 	parted -s $IMAGE unit s mkpart primary 8192 100%
 
 	# copy everything before the first partition, except the partition table
-	dd if=deps/armbian_orangepipc2.img of=$IMAGE bs=512 skip=1 seek=1 count=8191 conv=notrunc
+	dd if=deps/armbian_$IMAGE_TYPE.img of=$IMAGE bs=512 skip=1 seek=1 count=8191 conv=notrunc
 fi
 
 LODEV=`sudo losetup --show -f $IMAGE`
@@ -197,7 +239,7 @@ if [ "$IMAGE_TYPE" = "raspberrypi" ]; then
 	LODEV_BOOT=${LODEV}p1
 	LODEV_ROOT=${LODEV}p2
 	sudo mkfs.fat $LODEV_BOOT
-elif [ "$IMAGE_TYPE" = "orangepipc2" ]; then
+elif [[ $IMAGE_TYPE == orangepi* ]]; then
 	LODEV_ROOT=${LODEV}p1
 fi
 
@@ -244,17 +286,17 @@ EOF
 	PARTUUID=$(sudo blkid -o export $LODEV_ROOT | grep PARTUUID)
 	echo "dwc_otg.lpm_enable=0 root=$PARTUUID rootfstype=ext4 elevator=deadline cgroup_memory=1 cgroup_enable=memory rootwait init=/sbin/init.resizefs ro" | sudo tee boot/cmdline.txt >/dev/null
 	sudo rm -rf $PITEMP
-elif [ "$IMAGE_TYPE" = "orangepipc2" ]; then
+elif [[ $IMAGE_TYPE == orangepi* ]]; then
 	cat <<EOF | sudo tee root/boot/env.txt >/dev/null
 extraargs=elevator=deadline rootwait init=/sbin/init.resizefs ro
 EOF
-	sudo install -m 0644 -o root -g root orangepipc2-boot.cmd root/boot/boot.cmd
+	sudo install -m 0644 -o root -g root $IMAGE_TYPE-boot.cmd root/boot/boot.cmd
 	sudo mkimage -C none -A arm -T script -d root/boot/boot.cmd root/boot/boot.scr
 fi
 
 ## Install k3os, busybox and resize dependencies
 echo "== Installing... =="
-sudo tar -xf deps/k3os-rootfs-arm64.tar.gz --strip 1 -C root
+sudo tar -xf deps/k3os-rootfs-${ARCH}.tar.gz --strip 1 -C root
 # config.yaml will be created by init.resizefs based on MAC of eth0
 sudo cp -R config root/k3os/system
 for filename in root/k3os/system/config/*.*; do [ "$filename" != "${filename,,}" ] && sudo mv "$filename" "${filename,,}" ; done 
@@ -267,8 +309,8 @@ unpack_deb() {
 	rm -f data.tar.gz data.tar.xz control.tar.gz control.tar.xz debian-binary
 }
 
-unpack_deb "libc6-arm64.deb" "root"
-unpack_deb "busybox-arm64.deb" "root"
+unpack_deb "libc6-${ARCH_ALIAS}.deb" "root"
+unpack_deb "busybox-${ARCH_ALIAS}.deb" "root"
 
 for i in \
 	ar \
@@ -310,11 +352,11 @@ for i in \
 done
 
 echo "=== Unpacking firmware/image... ==="
-if [ "$IMAGE_TYPE" = "orangepipc2" ]; then
-	unpack_deb "linux-dtb-dev-sunxi64.deb" "root"
-	sudo ln -s $(cd root/boot; ls -d dtb-*-sunxi64 | head -n1) root/boot/dtb
-	unpack_deb "linux-image-dev-sunxi64.deb" "root"
-	sudo ln -s $(cd root/boot; ls -d vmlinuz-*-sunxi64 | head -n1) root/boot/Image
+if [[ $IMAGE_TYPE == orangepi* ]]; then
+	unpack_deb "linux-dtb-dev-sunxi${ARCH_BITS}.deb" "root"
+	sudo ln -s $(cd root/boot; ls -d dtb-*-sunxi${ARCH_BITS} | head -n1) root/boot/dtb
+	unpack_deb "linux-image-dev-sunxi${ARCH_BITS}.deb" "root"
+	sudo ln -s $(cd root/boot; ls -d vmlinuz-*-sunxi${ARCH_BITS} | head -n1) root/boot/Image
 elif [ "$IMAGE_TYPE" = "raspberrypi" ]; then
   BRCMTMP=$(mktemp -d)
   7z e -y deps/rpi-firmware-nonfree-master.zip -o"$BRCMTMP" "firmware-nonfree-master/brcm/*" > /dev/null
@@ -326,25 +368,25 @@ fi
 
 ## Add libraries and binaries needed to resize root FS & fsck every boot
 echo "=== Unpacking libs ... ==="
-unpack_deb "libcom-err2-arm64.deb" "root"
-unpack_deb "libblkid1-arm64.deb" "root"
-unpack_deb "libuuid1-arm64.deb" "root"
-unpack_deb "libext2fs2-arm64.deb" "root"
-unpack_deb "e2fsprogs-arm64.deb" "root"
-unpack_deb "util-linux-arm64.deb" "root"
+unpack_deb "libcom-err2-${ARCH_ALIAS}.deb" "root"
+unpack_deb "libblkid1-${ARCH_ALIAS}.deb" "root"
+unpack_deb "libuuid1-${ARCH_ALIAS}.deb" "root"
+unpack_deb "libext2fs2-${ARCH_ALIAS}.deb" "root"
+unpack_deb "e2fsprogs-${ARCH_ALIAS}.deb" "root"
+unpack_deb "util-linux-${ARCH_ALIAS}.deb" "root"
 
 ## Add tarball for the libraries and binaries needed only to resize root FS
 # TODO: replace parted by fdisk/sfdisk if simpler?
 echo "=== Unpacking resize libs ... ==="
 mkdir root-resize
-unpack_deb "parted-arm64.deb" "root-resize"
-unpack_deb "libparted2-arm64.deb" "root-resize"
-unpack_deb "libreadline7-arm64.deb" "root-resize"
-unpack_deb "libtinfo5-arm64.deb" "root-resize"
-unpack_deb "libdevmapper1-arm64.deb" "root-resize"
-unpack_deb "libselinux1-arm64.deb" "root-resize"
-unpack_deb "libudev1-arm64.deb" "root-resize"
-unpack_deb "libpcre3-arm64.deb" "root-resize"
+unpack_deb "parted-${ARCH_ALIAS}.deb" "root-resize"
+unpack_deb "libparted2-${ARCH_ALIAS}.deb" "root-resize"
+unpack_deb "libreadline7-${ARCH_ALIAS}.deb" "root-resize"
+unpack_deb "libtinfo5-${ARCH_ALIAS}.deb" "root-resize"
+unpack_deb "libdevmapper1-${ARCH_ALIAS}.deb" "root-resize"
+unpack_deb "libselinux1-${ARCH_ALIAS}.deb" "root-resize"
+unpack_deb "libudev1-${ARCH_ALIAS}.deb" "root-resize"
+unpack_deb "libpcre3-${ARCH_ALIAS}.deb" "root-resize"
 
 sudo tar -cJf root/root-resize.tar.xz "root-resize"
 sudo rm -rf root-resize
